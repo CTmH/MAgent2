@@ -5,20 +5,19 @@ import ctypes
 import multiprocessing
 import os
 import platform
+import sysconfig
+import importlib.util
 
 
 def _load_lib():
     """Load library in local."""
-    cur_path = os.path.dirname(os.path.abspath(os.path.expanduser(__file__)))
-    lib_path = os.path.join(cur_path, "..", "venv", "Lib", "site-packages", "magent2")
-    if platform.system() == "Darwin":
-        path_to_so_file = os.path.join(lib_path, "libmagent.dylib")
-    elif platform.system() == "Linux":
-        path_to_so_file = os.path.join(lib_path, "libmagent.so")
-    elif platform.system() == "Windows":
-        path_to_so_file = os.path.join(lib_path, "magent.dll")
-    else:
-        raise BaseException("unsupported system: " + platform.system())
+    spec = importlib.util.find_spec("magent2")
+    if spec is None or spec.origin is None:
+            raise FileNotFoundError("Could not find magent2 package")
+    package_dir = os.path.dirname(spec.origin)
+    suffix = sysconfig.get_config_var('EXT_SUFFIX')
+    target_name = f"libmagent{suffix}"
+    path_to_so_file = os.path.join(package_dir, target_name)
 
     if not os.path.exists(path_to_so_file):
         raise FileNotFoundError(f"Could not find the DLL file at: {path_to_so_file}")
