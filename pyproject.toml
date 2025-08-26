@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "magent2"
+version = "0.3.3"
 description = "Multi-Agent Reinforcement Learning environments with very large numbers of agents."
 readme = "README.md"
 requires-python = ">= 3.10"
@@ -24,11 +25,10 @@ classifiers = [
     'Topic :: Scientific/Engineering :: Artificial Intelligence',
 ]
 dependencies = [
-    "numpy>=1.21.0,<2.0",
+    "numpy>=2.0",
     "pygame>=2.1.0",
     "pettingzoo>=1.23.1",
 ]
-dynamic = ["version"]
 
 [project.urls]
 Homepage = "https://farama.org"
