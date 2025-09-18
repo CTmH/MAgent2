@@ -163,8 +163,8 @@ class magent_parallel_env(ParallelEnv):
         self.agents = self.possible_agents[:]
         self.env.reset()
         self.frames = 0
-        self.team_sizes = [self.env.get_num(handle) for handle in self.handles]
         self.generate_map()
+        self.team_sizes = [self.env.get_num(handle) for handle in self.handles]
         return self._compute_observations(), {agent: {} for agent in self.agents}
 
     def _compute_observations(self):
