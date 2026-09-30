@@ -30,6 +30,7 @@ GridWorld::GridWorld() {
     reward_des_initialized = false;
     embedding_size = 0;
     omp_threads = 1;
+    complementary_pursuit = false;
     random_engine.seed(0);
 
     counter_x = counter_y = nullptr;
@@ -165,6 +166,7 @@ void GridWorld::register_agent_type(const char *name, int n, const char **keys, 
         LOG(FATAL) << "duplicated name of agent type in GridWorld::register_agent_type : " << str;
 
     agent_types.insert(std::make_pair(str, AgentType(n, str, keys, values, turn_mode)));
+    complementary_pursuit |= agent_types.at(str).complementary_attack;
 }
 
 void GridWorld::new_group(const char* agent_name, GroupHandle *group) {
@@ -311,11 +313,14 @@ void GridWorld::get_observation(GroupHandle group, float **linear_buffers, bool 
     const int view_width  = g.get_type().view_range->get_width();
     const int view_height = g.get_type().view_range->get_height();
     const int n_group = (int)groups.size();
-    const int n_action = (int)type.action_space.size();
+    const int n_action = type.get_action_feature_size();
     const int feature_size = get_feature_size(group);
 
     std::vector<Agent*> &agents = g.get_agents();
     size_t agent_size = agents.size();
+    if (agent_size == 0)
+        return;  // Empty groups have no observation data or minimap to construct.
+
 
     // transform buffers
     const int output_height = center_only ? 1 : view_height;
@@ -403,7 +408,24 @@ void GridWorld::get_observation(GroupHandle group, float **linear_buffers, bool 
         agent->get_embedding(feature_buffer.data + i*feature_size, embedding_size);
         Position pos = agent->get_pos();
         // last action
-        feature_buffer.at(i, embedding_size + agent->get_action()) = 1;
+        const int action = agent->get_action();
+        if (type.complementary_attack) {
+            // Five movement slots, two attack modes, and normalized local dx/dy.
+            // Unset actions leave all nine slots zero after reset.
+            if (action >= 0 && action < type.attack_base) {
+                feature_buffer.at(i, embedding_size + action) = 1;
+            } else if (action >= type.attack_base && action < (int)type.action_space.size()) {
+                const int count = type.attack_range->get_count();
+                const int attack = action - type.attack_base;
+                int dx, dy;
+                type.attack_range->num2delta(attack % count, dx, dy);
+                feature_buffer.at(i, embedding_size + 5 + attack / count) = 1;
+                feature_buffer.at(i, embedding_size + 7) = (dx + 2) / 4.0f;
+                feature_buffer.at(i, embedding_size + 8) = (dy + 2) / 4.0f;
+            }
+        } else {
+            feature_buffer.at(i, embedding_size + action) = 1;
+        }
         // last reward
         feature_buffer.at(i, embedding_size + n_action) = agent->get_last_reward();
         if (minimap_mode) { // absolute coordination
@@ -469,6 +491,62 @@ void GridWorld::set_action(GroupHandle group, const int *actions) {
     }
 }
 
+void GridWorld::resolve_complementary_attacks(std::vector<RenderAttackEvent> &render_events) {
+    // Snapshot every target before applying damage. A lethal attack must not
+    // hide a target from later participants or give a thread the last-hit credit.
+    std::map<PositionInteger, std::vector<AttackAction>> attacks_by_target;
+    for (const AttackAction &attack : attack_buffer) {
+        Agent *agent = attack.agent;
+        if (agent->is_dead())
+            continue;
+        int x, y;
+        PositionInteger pos = map.get_attack_obj(attack, x, y);
+        if (!first_render)
+            render_events.push_back(RenderAttackEvent{agent->get_id(), x, y});
+        if (map.get_attack_target(pos) == nullptr) {
+            agent->add_reward(agent->get_type().attack_penalty);
+        } else {
+            attacks_by_target[pos].push_back(attack);
+        }
+    }
+
+    for (const auto &entry : attacks_by_target) {
+        Agent *target = map.get_attack_target(entry.first);
+        const std::vector<AttackAction> &attacks = entry.second;
+        const AgentType &type = attacks[0].agent->get_type();
+        const int target_count = type.attack_range->get_count();
+        int counts[2] = {0, 0};
+        for (const AttackAction &attack : attacks)
+            ++counts[attack.action / target_count];
+        const bool effective = counts[0] > 0 && counts[1] > 0;
+        const int critical_count = effective ? (counts[0] == 1) + (counts[1] == 1) : 0;
+        const float damage = effective ? type.damage : type.ineffective_damage;
+
+        // Exactly one damage event per target, including same-mode attacks.
+        target->be_attack(damage, true);
+        const bool killed = target->is_dead();
+        target->add_reward(target->get_type().attacked_penalty);
+        if (killed) {
+            map.remove_agent(target);
+            groups[target->get_group()].inc_dead_ct();
+        }
+        float pool = effective ? type.effective_attack_reward_pool : type.ineffective_attack_reward_pool;
+        if (killed)
+            pool += target->get_type().kill_reward;
+        for (const AttackAction &attack : attacks) {
+            Agent *agent = attack.agent;
+            float reward = pool / attacks.size();
+            if (effective && counts[attack.action / target_count] == 1)
+                reward += type.critical_contribution_reward_pool / critical_count;
+            agent->add_reward(reward);
+            agent->set_last_op(killed ? OP_KILL : OP_ATTACK);
+            agent->set_op_obj(target);
+            if (killed)
+                agent->add_hp(target->get_type().kill_supply / attacks.size());
+        }
+    }
+}
+
 void GridWorld::step(int *done) {
     #pragma omp declare reduction (merge : std::vector<RenderAttackEvent> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
     const bool stat = false;
@@ -477,48 +555,52 @@ void GridWorld::step(int *done) {
     size_t attack_size = attack_buffer.size();
     size_t group_size  = groups.size();
 
-    // shuffle attacks
-    for (int i = 0; i < attack_size; i++) {
-        int j = (int)random_engine() % (unsigned long)(i+1);
-        std::swap(attack_buffer[i], attack_buffer[j]);
-    }
-
-    LOG(TRACE) << "attack.  ";
     std::vector<RenderAttackEvent> render_attack_buffer;
-    std::map<PositionInteger, int> attack_obj_counter;    // for statistic info
-
-    // attack
-    #pragma omp parallel for num_threads(omp_threads) reduction(merge: render_attack_buffer)
-    for (int i = 0; i < attack_size; i++) {
-        Agent *agent = attack_buffer[i].agent;
-
-        if (agent->is_dead())
-            continue;
-
-        int obj_x, obj_y;
-        PositionInteger obj_pos = map.get_attack_obj(attack_buffer[i], obj_x, obj_y);
-        if (!first_render)
-            render_attack_buffer.emplace_back(RenderAttackEvent{agent->get_id(), obj_x, obj_y});
-
-        if (obj_pos == -1) {  // attack blank block
-            agent->add_reward(agent->get_type().attack_penalty);
-            continue;
+    std::map<PositionInteger, int> attack_obj_counter;
+    if (complementary_pursuit) {
+        resolve_complementary_attacks(render_attack_buffer);
+    } else {
+        // shuffle attacks
+        for (int i = 0; i < attack_size; i++) {
+            int j = (int)random_engine() % (unsigned long)(i+1);
+            std::swap(attack_buffer[i], attack_buffer[j]);
         }
 
-        if (stat) {
-            attack_obj_counter[obj_pos]++;
-        }
+        LOG(TRACE) << "attack.  ";
 
-        float reward = 0.0;
-        GroupHandle dead_group = -1;
-        #pragma omp critical
-        {
-            reward = map.do_attack(agent, obj_pos, dead_group);
-            if (dead_group != -1) {
-                groups[dead_group].inc_dead_ct();
+        // attack
+        #pragma omp parallel for num_threads(omp_threads) reduction(merge: render_attack_buffer)
+        for (int i = 0; i < attack_size; i++) {
+            Agent *agent = attack_buffer[i].agent;
+
+            if (agent->is_dead())
+                continue;
+
+            int obj_x, obj_y;
+            PositionInteger obj_pos = map.get_attack_obj(attack_buffer[i], obj_x, obj_y);
+            if (!first_render)
+                render_attack_buffer.emplace_back(RenderAttackEvent{agent->get_id(), obj_x, obj_y});
+
+            if (obj_pos == -1) {  // attack blank block
+                agent->add_reward(agent->get_type().attack_penalty);
+                continue;
             }
+
+            if (stat) {
+                attack_obj_counter[obj_pos]++;
+            }
+
+            float reward = 0.0;
+            GroupHandle dead_group = -1;
+            #pragma omp critical
+            {
+                reward = map.do_attack(agent, obj_pos, dead_group);
+                if (dead_group != -1) {
+                    groups[dead_group].inc_dead_ct();
+                }
+            }
+            agent->add_reward(reward + agent->get_type().attack_penalty);
         }
-        agent->add_reward(reward + agent->get_type().attack_penalty);
     }
     attack_buffer.clear();
     if (!first_render)
@@ -943,7 +1025,7 @@ int GridWorld::group2channel(GroupHandle group) {
 
 int GridWorld::get_feature_size(GroupHandle group) {
     // feature space layout : [embedding, last_action (one hot), last_reward]
-    int feature_space = embedding_size + (int)groups[group].get_type().action_space.size() + 1;
+    int feature_space = embedding_size + groups[group].get_type().get_action_feature_size() + 1;
     if (goal_mode)
         feature_space += 2;
     if (minimap_mode)  // x, y coordinate

@@ -29,6 +29,15 @@ public:
     int speak_ability;
     float damage, trace, eat_ability, step_recover, kill_supply, food_supply;
     bool attack_in_group;
+    bool complementary_attack;
+    float ineffective_damage, attacked_penalty;
+    Reward effective_attack_reward_pool, ineffective_attack_reward_pool;
+    Reward critical_contribution_reward_pool;
+
+    // Keep the legacy nine action-feature slots for complementary pursuers.
+    int get_action_feature_size() const {
+        return complementary_attack ? 9 : (int)action_space.size();
+    }
 
     Reward step_reward, kill_reward, dead_penalty, attack_penalty;
 

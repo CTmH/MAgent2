@@ -83,6 +83,8 @@ private:
     bool calc_event_node(EventNode *node, RewardRule &rule);
     void collect_related_symbol(EventNode &node);
 
+    void resolve_complementary_attacks(std::vector<RenderAttackEvent> &render_events);
+
     // utility
     // to make channel layout in observation symmetric to every group
     std::vector<int> make_channel_trans(
@@ -100,6 +102,7 @@ private:
     bool mean_mode;
     int embedding_size;  // default = 0
     int omp_threads;
+    bool complementary_pursuit;
 
     // game states : map, agent and group
     Map map;
@@ -199,15 +202,16 @@ public:
             add_hp(type.step_recover);
         }
         else
-            be_attack(-type.step_recover);
+            be_attack(-type.step_recover, type.complementary_attack);
         return dead;
     }
 
-    void be_attack(float damage) {
+    void be_attack(float damage, bool capture_rules = false) {
         hp -= damage;
-        if (hp < 0.0) {
+        if (hp < 0.0 || (capture_rules && hp == 0.0)) {
             dead = true;
-            next_reward = type.dead_penalty;
+            // Capture rewards remain additive even if the participant dies this step.
+            next_reward = capture_rules ? next_reward + type.dead_penalty : type.dead_penalty;
         }
     }
 

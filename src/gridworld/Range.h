@@ -7,6 +7,7 @@
 #define MAGNET_GRIDWORLD_RANGE_H
 
 #include <cstdio>
+#include <cstdlib>
 #include <tgmath.h>
 #include <cstring>
 
@@ -97,6 +98,29 @@ protected:
     bool *is_in_range;
     int *dx;
     int *dy;
+};
+
+// Fixed radius-two attack range, excluding the attacker's own cell.
+class ManhattanAttackRange : public Range {
+public:
+    ManhattanAttackRange() {
+        width = height = 5;
+        x1 = y1 = -2;
+        x2 = y2 = 2;
+        is_in_range = new bool[25]();
+        dx = new int[12];
+        dy = new int[12];
+        for (int y = -2; y <= 2; ++y) {
+            for (int x = -2; x <= 2; ++x) {
+                int distance = std::abs(x) + std::abs(y);
+                if (distance > 0 && distance <= 2) {
+                    is_in_range[(y + 2) * 5 + x + 2] = true;
+                    dx[count] = x;
+                    dy[count++] = y;
+                }
+            }
+        }
+    }
 };
 
 // sector range

@@ -47,6 +47,11 @@ AgentType::AgentType(int n, std::string name, const char **keys, float *values, 
     step_reward = kill_reward  = dead_penalty = attack_penalty = 0.0;
     can_absorb = false;
 
+    complementary_attack = false;
+    ineffective_damage = attacked_penalty = 0;
+    effective_attack_reward_pool = ineffective_attack_reward_pool = 0;
+    critical_contribution_reward_pool = 0;
+
     // init member vars from str (reflection)
     bool is_set;
     for (int i = 0; i < n; i++) {
@@ -68,6 +73,12 @@ AgentType::AgentType(int n, std::string name, const char **keys, float *values, 
         AGENT_TYPE_SET_FLOAT(step_recover); AGENT_TYPE_SET_FLOAT(kill_supply);
         AGENT_TYPE_SET_FLOAT(food_supply);
 
+        AGENT_TYPE_SET_BOOL(complementary_attack);
+        AGENT_TYPE_SET_FLOAT(ineffective_damage);
+        AGENT_TYPE_SET_FLOAT(attacked_penalty);
+        AGENT_TYPE_SET_FLOAT(effective_attack_reward_pool);
+        AGENT_TYPE_SET_FLOAT(ineffective_attack_reward_pool);
+        AGENT_TYPE_SET_FLOAT(critical_contribution_reward_pool);
         AGENT_TYPE_SET_BOOL(attack_in_group); AGENT_TYPE_SET_BOOL(can_absorb);
 
         AGENT_TYPE_SET_FLOAT(step_reward);  AGENT_TYPE_SET_FLOAT(kill_reward);
@@ -93,7 +104,9 @@ AgentType::AgentType(int n, std::string name, const char **keys, float *values, 
         view_range = new SectorRange(view_angle, view_radius, parity);
     }
 
-    if (attack_angle >= 180) {
+    if (complementary_attack) {
+        attack_range = new ManhattanAttackRange();
+    } else if (attack_angle >= 180) {
         if (fabs(attack_angle - 360) > 1e-5) {
             LOG(FATAL) << "only supports ranges with angle = 360, when angle > 180.";
         }
@@ -115,7 +128,7 @@ AgentType::AgentType(int n, std::string name, const char **keys, float *values, 
     } else {
         attack_base = turn_base;
     }
-    int n_action = attack_base + attack_range->get_count();
+    int n_action = attack_base + attack_range->get_count() * (complementary_attack ? 2 : 1);
     for (int i = 0; i < n_action; i++) {
         action_space.push_back(i);
     }

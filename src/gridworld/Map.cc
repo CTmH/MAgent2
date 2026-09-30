@@ -232,7 +232,10 @@ PositionInteger Map::get_attack_obj(const AttackAction &attack, int &obj_x, int 
     int agent_x, agent_y;
     int rela_x, rela_y;
 
-    agent->get_type().attack_range->num2delta(attack.action, rela_x, rela_y);
+    int target_action = attack.action;
+    if (type->complementary_attack)
+        target_action %= type->attack_range->get_count();
+    type->attack_range->num2delta(target_action, rela_x, rela_y);
 
     save_to_real(agent, agent_x, agent_y);
     rela_to_abs(agent_x, agent_y, dir, att_x_offset + rela_x, att_y_offset + rela_y, obj_x, obj_y);
@@ -266,6 +269,12 @@ PositionInteger Map::get_attack_obj(const AttackAction &attack, int &obj_x, int 
 
     }
     return -1;
+}
+
+Agent *Map::get_attack_target(PositionInteger pos_int) const {
+    if (pos_int < 0 || slots[pos_int].occ_type != OCC_AGENT)
+        return nullptr;
+    return static_cast<Agent *>(slots[pos_int].occupier);
 }
 
 // do attack for agent, return kill_reward and dead_group

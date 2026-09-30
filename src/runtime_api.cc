@@ -42,6 +42,10 @@ DLL_EXPORT int env_openmp_enabled() {
 #endif
 }
 
+DLL_EXPORT int env_complementary_pursuit_enabled() {
+    return 1;
+}
+
 // run step
 DLL_EXPORT int env_reset(EnvHandle game) {
     LOG(TRACE) << "env reset.  ";

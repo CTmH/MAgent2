@@ -27,6 +27,7 @@ DLL_EXPORT int env_new_game(EnvHandle *game, const char *name);
 DLL_EXPORT int env_delete_game(EnvHandle game);
 DLL_EXPORT int env_config_game(EnvHandle game, const char *name, void *p_value);
 DLL_EXPORT int env_openmp_enabled();
+DLL_EXPORT int env_complementary_pursuit_enabled();
 
 // run step
 DLL_EXPORT int env_reset(EnvHandle game);

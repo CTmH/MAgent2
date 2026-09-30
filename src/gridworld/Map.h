@@ -59,6 +59,7 @@ public:
 
     PositionInteger get_attack_obj(const AttackAction &attack, int &obj_x, int &obj_y) const;
     Reward do_attack(Agent *agent, PositionInteger pos_int, GroupHandle &dead_group);
+    Agent *get_attack_target(PositionInteger pos_int) const;
 
     Reward do_move(Agent *agent, const int delta[2]);
     Reward do_turn(Agent *agent, int wise);

@@ -14,6 +14,7 @@ def test_import_environments():
         "battle_v4",
         "battlefield_v5",
         "combined_arms_v6",
+        "complementary_pursuit_v1",
         "gather_v5",
         "magent_env",
         "tiger_deer_v4",

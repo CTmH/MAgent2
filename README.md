@@ -24,6 +24,73 @@ env = battle_v4.parallel_env(num_threads=2)
 This limits each OpenMP parallel region in that environment, not the process's CPU affinity or threads used by other libraries. The native library must be built with OpenMP support to use more than one thread.
 
 
+## Complementary Pursuit
+
+```python
+from magent2.environments import complementary_pursuit_v1
+
+env = complementary_pursuit_v1.parallel_env(
+    num_threads=1,
+    effective_damage=10.0,
+    ineffective_damage=0.2,
+    effective_attack_reward_pool=0.2,
+    ineffective_attack_reward_pool=0.02,  # Set to zero to disable hit shaping.
+    critical_contribution_reward_pool=0.2,
+    kill_reward_pool=1.0,
+    kill_hp_pool=8.0,
+)
+observations, infos = env.reset(seed=42)
+```
+
+Agents are named `evader_*` and `pursuer_*`. Evaders have five movement
+choices; pursuers have 29 choices: movement `0..4` (stay is `2`), A attacks
+`5..16`, and B attacks `17..28`. Each attack selects one target offset within
+fixed Manhattan distance two. Offsets are ordered by local `dy`, then `dx`,
+excluding `(0, 0)`. The first A/B attack targets `(0, -2)`. Intermediate walls
+do not obstruct attacks, matching the existing engine's targeting rules.
+
+Attacks are grouped by target before damage is applied. A target receiving
+both A and B takes effective damage; any other nonempty set of hits inflicts
+ineffective damage. Damage is applied **once per target per step**, regardless
+of the number of attackers. Invalid targets receive no damage. At zero HP,
+an evader is captured and removed before recovery or movement.
+
+The corresponding hit reward pool is split among the current attackers.
+An effective attack also splits the critical-contribution pool among attackers
+whose removal would make it ineffective: both attackers in AB, only B in AAB,
+and nobody in AABB. Any capture, including an ineffective one, additionally
+splits `kill_reward_pool` and `kill_hp_pool` among the current attackers. HP is
+capped individually; unused shares are not redistributed. Nonlethal hits
+provide no HP. Under default settings, AB earns 0.7 per pursuer, AAB earns
+0.4/0.4/0.6, and a lone ineffective hit earns 0.02. Repeated ineffective hits
+on a healthy evader are offset by its default recovery. Raising ineffective
+damage or lowering recovery allows ineffective captures, with the same
+capture reward and HP rules.
+
+Other configurable defaults are `pursuer_hp=10`, `evader_hp=5`,
+`pursuer_step_recover=-0.1`, `evader_step_recover=0.2`,
+`missed_attack_reward=0`, `pursuer_step_reward=0`, `pursuer_dead_penalty=0`,
+`evader_step_reward=0`, `evader_dead_penalty=-1`, and `evader_attacked=-0.1`.
+The evader hit penalty applies once per target per step, including capture.
+Death penalties are additive to rewards already earned during the step.
+The usual `map_size`, `max_cycles`, `minimap_mode`, `extra_features`, `seed`,
+`render_mode`, and `num_threads` options are also supported. Reward pools,
+damage, and evader recovery must be nonnegative; HP must be positive.
+
+Observation and state shapes match Tiger-Deer under the same map and feature
+settings. With `extra_features=True`, the pursuer's nine action-history slots
+encode five movement one-hot values, two attack-mode one-hot values, and
+`(dx + 2) / 4`, `(dy + 2) / 4`. Movement zeros the attack slots; attacks zero
+the movement slots. These feature meanings and the action space differ from
+Tiger-Deer, so existing policies are not directly compatible. The spatial
+views retain their original sizes: 9x9 for pursuers and 3x3 for evaders.
+
+Rebuild the native library after updating the sources. Regression checks:
+
+```sh
+PYTHONPATH=. python tests/test_complementary_pursuit.py
+```
+
 ## Requirements
 MAgent2 supports Linux and macOS and Python 3.10+.
 
