@@ -106,6 +106,7 @@ def parallel_env(
     extra_features=False,
     render_mode=None,
     seed=None,
+    num_threads=1,
     **env_args,
 ):
     env_env_args = dict(**default_env_args)
@@ -118,6 +119,7 @@ def parallel_env(
         extra_features,
         render_mode,
         seed,
+        num_threads,
     )
 
 
@@ -127,11 +129,18 @@ def raw_env(
     minimap_mode=minimap_mode_default,
     extra_features=False,
     seed=None,
+    num_threads=1,
     **env_args,
 ):
     return parallel_to_aec_wrapper(
         parallel_env(
-            map_size, max_cycles, minimap_mode, extra_features, seed=seed, **env_args
+            map_size,
+            max_cycles,
+            minimap_mode,
+            extra_features,
+            seed=seed,
+            num_threads=num_threads,
+            **env_args,
         )
     )
 
@@ -211,6 +220,7 @@ class _parallel_env(magent_parallel_env, EzPickle):
         extra_features,
         render_mode=None,
         seed=None,
+        num_threads=1,
     ):
         EzPickle.__init__(
             self,
@@ -221,10 +231,13 @@ class _parallel_env(magent_parallel_env, EzPickle):
             extra_features,
             render_mode,
             seed,
+            num_threads,
         )
         assert map_size >= 10, "size of map must be at least 10"
         env = magent2.GridWorld(
-            get_config(map_size, minimap_mode, seed, **reward_args), map_size=map_size
+            get_config(map_size, minimap_mode, seed, **reward_args),
+            map_size=map_size,
+            num_threads=num_threads,
         )
 
         handles = env.get_handles()

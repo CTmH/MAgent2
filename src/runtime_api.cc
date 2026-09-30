@@ -34,6 +34,14 @@ DLL_EXPORT int env_config_game(EnvHandle game, const char *name, void *p_value) 
     return 0;
 }
 
+DLL_EXPORT int env_openmp_enabled() {
+#ifdef _OPENMP
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 // run step
 DLL_EXPORT int env_reset(EnvHandle game) {
     LOG(TRACE) << "env reset.  ";
@@ -114,6 +122,11 @@ DLL_EXPORT int gridworld_add_agents(EnvHandle game, GroupHandle group, int n, co
 DLL_EXPORT int gridworld_clear_dead(EnvHandle game) {
     LOG(TRACE) << "gridworld clear dead.  ";
     ((::magent::gridworld::GridWorld *)game)->clear_dead();
+    return 0;
+}
+
+DLL_EXPORT int gridworld_get_state_observation(EnvHandle game, GroupHandle group, float **buffer) {
+    ((::magent::gridworld::GridWorld *)game)->get_observation(group, buffer, true);
     return 0;
 }
 

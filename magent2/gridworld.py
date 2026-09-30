@@ -223,7 +223,7 @@ class GridWorld(Environment):
     OBS_INDEX_VIEW = 0
     OBS_INDEX_HP = 1
 
-    def __init__(self, config: Config, **kwargs):
+    def __init__(self, config: Config, num_threads=1, **kwargs):
         """
         Parameters
         ----------
@@ -234,6 +234,17 @@ class GridWorld(Environment):
             if config is a Config Object, then parameters are stored in that object
         """
         Environment.__init__(self)
+        if num_threads is None:
+            num_threads = 1
+        if (
+            isinstance(num_threads, bool)
+            or not isinstance(num_threads, int)
+            or not 1 <= num_threads <= 2**31 - 1
+        ):
+            raise ValueError("num_threads must be a positive integer")
+        openmp_status = getattr(_LIB, "env_openmp_enabled", None)
+        if num_threads > 1 and (openmp_status is None or not openmp_status()):
+            raise RuntimeError("MAgent2 was built without OpenMP support")
 
         # if is str, load built in configuration
         if isinstance(config, str):
@@ -248,6 +259,10 @@ class GridWorld(Environment):
         game = ctypes.c_void_p()
         _LIB.env_new_game(ctypes.byref(game), b"GridWorld")
         self.game = game
+        if openmp_status is not None:
+            _LIB.env_config_game(
+                self.game, b"num_threads", ctypes.byref(ctypes.c_int(num_threads))
+            )
 
         # set global configuration
         config_value_type = {
@@ -514,6 +529,22 @@ class GridWorld(Environment):
         _LIB.env_get_observation(self.game, handle, bufs)
 
         return view_buf, feature_buf
+
+    def get_state_observation(self, handle: ctypes.c_int32):
+        """Read observation channel 2 at the center and the non-spatial features."""
+        get_state = getattr(_LIB, "gridworld_get_state_observation", None)
+        if get_state is None:
+            view, features = self.get_observation(handle)
+            return view[:, view.shape[1] // 2, view.shape[2] // 2, 2], features
+
+        n = self.get_num(handle)
+        view = np.empty((n, self.view_space[handle.value][2]), dtype=np.float32)
+        features = np.empty((n,) + self.feature_space[handle.value], dtype=np.float32)
+        buffers = (ctypes.POINTER(ctypes.c_float) * 2)(
+            as_float_c_array(view), as_float_c_array(features)
+        )
+        get_state(self.game, handle, buffers)
+        return view[:, 2], features
 
     def set_action(self, handle: ctypes.c_int32, actions: np.ndarray):
         """Set actions for whole group.
@@ -798,7 +829,8 @@ class GridWorld(Environment):
         return agent_info, attack_event
 
     def __del__(self):
-        _LIB.env_delete_game(self.game)
+        if hasattr(self, "game"):
+            _LIB.env_delete_game(self.game)
 
     # ====== PRIVATE ======
     def _serialize_event_exp(self, config):

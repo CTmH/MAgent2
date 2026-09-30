@@ -13,9 +13,43 @@ MAgent2 is a maintained fork of the original [MAgent](https://github.com/geek-ai
 ## Installation
 Install using pip: `pip install magent2`. See [docs](https://magent2.farama.org/) for usage information.
 
+Each environment uses one OpenMP thread by default. To use more, pass `num_threads` when creating it:
+
+```python
+from magent2.environments import battle_v4
+
+env = battle_v4.parallel_env(num_threads=2)
+```
+
+This limits each OpenMP parallel region in that environment, not the process's CPU affinity or threads used by other libraries. The native library must be built with OpenMP support to use more than one thread.
+
 
 ## Requirements
-MAgent2 supports Linux and macOS and Python 3.8+.
+MAgent2 supports Linux and macOS and Python 3.10+.
+
+### Building from source
+
+Source builds require a C++ compiler with OpenMP support and its OpenMP runtime
+(for example, GCC with libgomp on Linux or macOS). These are system dependencies;
+`pyproject.toml` installs the Python build tools, including CMake 4.0+, but does not
+install the compiler or OpenMP runtime. Configuration fails if OpenMP is missing.
+
+With a suitable compiler installed, build from the project directory:
+
+```sh
+python -m pip install .
+```
+
+On macOS, the default Apple Clang compiler may need additional OpenMP setup.
+To use MacPorts GCC 15 instead, select it explicitly:
+
+```sh
+CC=/opt/local/bin/gcc-mp-15 CXX=/opt/local/bin/g++-mp-15 python -m pip install .
+```
+
+Use a clean source tree or remove the previous CMake build cache when switching
+compilers. OpenMP support is required at build time; the default runtime setting
+remains `num_threads=1`.
 
 ## References
 ```

@@ -124,6 +124,7 @@ def parallel_env(
     extra_features=False,
     render_mode=None,
     seed=None,
+    num_threads=1,
     **reward_args,
 ):
     env_reward_args = dict(**default_reward_args)
@@ -136,6 +137,7 @@ def parallel_env(
         extra_features,
         render_mode,
         seed,
+        num_threads,
     )
 
 
@@ -144,10 +146,18 @@ def raw_env(
     minimap_mode=minimap_mode_default,
     extra_features=False,
     seed=None,
+    num_threads=1,
     **reward_args,
 ):
     return parallel_to_aec_wrapper(
-        parallel_env(max_cycles, minimap_mode, extra_features, seed=seed, **reward_args)
+        parallel_env(
+            max_cycles,
+            minimap_mode,
+            extra_features,
+            seed=seed,
+            num_threads=num_threads,
+            **reward_args,
+        )
     )
 
 
@@ -226,6 +236,7 @@ class _parallel_env(magent_parallel_env, EzPickle):
         extra_features,
         render_mode=None,
         seed=None,
+        num_threads=1,
     ):
         EzPickle.__init__(
             self,
@@ -236,9 +247,11 @@ class _parallel_env(magent_parallel_env, EzPickle):
             extra_features,
             render_mode,
             seed,
+            num_threads,
         )
         env = magent2.GridWorld(
-            get_config(map_size, minimap_mode, seed=seed, **reward_args)
+            get_config(map_size, minimap_mode, seed=seed, **reward_args),
+            num_threads=num_threads,
         )
         handles = env.get_handles()
         reward_vals = np.array([5] + list(reward_args.values()))

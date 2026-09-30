@@ -46,6 +46,8 @@ public:
 
     // run step
     void get_observation(GroupHandle group, float **linear_buffers) override;
+    // The state sampler consumes only center channel 2 and the feature buffer.
+    void get_observation(GroupHandle group, float **linear_buffers, bool center_only);
     void set_action(GroupHandle group, const int *actions) override;
     void step(int *done) override;
     void get_reward(GroupHandle group, float *buffer) override;
@@ -97,6 +99,7 @@ private:
     bool large_map_mode; // default = False
     bool mean_mode;
     int embedding_size;  // default = 0
+    int omp_threads;
 
     // game states : map, agent and group
     Map map;

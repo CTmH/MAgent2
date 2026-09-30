@@ -14,6 +14,9 @@
 namespace magent {
 namespace gridworld {
 
+// ponytail: conservative cutoff for cheap read-only loops; retune with getter benchmarks on other runtimes.
+static const size_t PARALLEL_INFO_MIN_AGENTS = 65536;
+
 GridWorld::GridWorld() {
     first_render = true;
 
@@ -26,6 +29,7 @@ GridWorld::GridWorld() {
 
     reward_des_initialized = false;
     embedding_size = 0;
+    omp_threads = 1;
     random_engine.seed(0);
 
     counter_x = counter_y = nullptr;
@@ -37,7 +41,7 @@ GridWorld::~GridWorld() {
 
         // free agents
         size_t agent_size = agents.size();
-        #pragma omp parallel for
+        #pragma omp parallel for num_threads(omp_threads)
         for (int j = 0; j < agent_size; j++) {
             delete agents[j];
         }
@@ -72,8 +76,12 @@ GridWorld::~GridWorld() {
 void GridWorld::reset() {
     id_counter = 0;
 
-    if (width * height > 99 * 99) {
-        large_map_mode = true;
+    if (large_map_mode) {
+        delete [] move_buffers;
+        delete [] turn_buffers;
+    }
+    large_map_mode = width * height > 99 * 99;
+    if (large_map_mode) {
         if (width * height > 1000 * 1000) {
             NUM_SEP_BUFFER = 16;
         } else {
@@ -102,7 +110,7 @@ void GridWorld::reset() {
 
         // free agents
         size_t agent_size = agents.size();
-        #pragma omp parallel for
+        #pragma omp parallel for num_threads(omp_threads)
         for (int j = 0; j < agent_size; j++) {
             delete agents[j];
         }
@@ -138,6 +146,8 @@ void GridWorld::set_config(const char *key, void *p_value) {
         goal_mode = bvalue;
     else if (strequ(key, "embedding_size")) // embedding size in the observation.feature
         embedding_size = ivalue;
+    else if (strequ(key, "num_threads"))
+        omp_threads = ivalue;
 
     else if (strequ(key, "render_dir"))     // the directory of saved videos
         render_generator.set_render("save_dir", strvalue);
@@ -290,6 +300,10 @@ void GridWorld::add_agents(GroupHandle group, int n, const char *method,
 }
 
 void GridWorld::get_observation(GroupHandle group, float **linear_buffers) {
+    get_observation(group, linear_buffers, false);
+}
+
+void GridWorld::get_observation(GroupHandle group, float **linear_buffers, bool center_only) {
     Group &g = groups[group];
     AgentType &type = g.get_type();
 
@@ -304,10 +318,12 @@ void GridWorld::get_observation(GroupHandle group, float **linear_buffers) {
     size_t agent_size = agents.size();
 
     // transform buffers
-    NDPointer<float, 4> view_buffer(linear_buffers[0], {{-1, view_height, view_width, n_channel}});
+    const int output_height = center_only ? 1 : view_height;
+    const int output_width = center_only ? 1 : view_width;
+    NDPointer<float, 4> view_buffer(linear_buffers[0], {{-1, output_height, output_width, n_channel}});
     NDPointer<float, 2> feature_buffer(linear_buffers[1], {{-1, feature_size}});
 
-    memset(view_buffer.data, 0, sizeof(float) * agent_size * view_height * view_width * n_channel);
+    memset(view_buffer.data, 0, sizeof(float) * agent_size * output_height * output_width * n_channel);
     memset(feature_buffer.data, 0, sizeof(float) * agent_size * feature_size);
 
     // gather view info from AgentType
@@ -328,7 +344,7 @@ void GridWorld::get_observation(GroupHandle group, float **linear_buffers) {
     int scale_h = (height + view_height - 1) / view_height;
     int scale_w = (width + view_width - 1) / view_width;
 
-    if (minimap_mode) {
+    if (minimap_mode && !center_only) {
         minimap.data = new float [view_height * view_width * n_group];
         memset(minimap.data, 0, sizeof(float) * view_height * view_width * n_group);
 
@@ -337,7 +353,7 @@ void GridWorld::get_observation(GroupHandle group, float **linear_buffers) {
             group_sizes.push_back(groups[i].get_size() > 0 ? (int)groups[i].get_size() : 1);
 
         // by agents
-        #pragma omp parallel for
+        #pragma omp parallel for num_threads(omp_threads)
         for (int i = 0; i < n_group; i++) {
             std::vector<Agent*> &agents_ = groups[i].get_agents();
             AgentType type_ = agents[0]->get_type();
@@ -360,15 +376,15 @@ void GridWorld::get_observation(GroupHandle group, float **linear_buffers) {
     }
 
     // fill local view for every agents
-    #pragma omp parallel for
+    #pragma omp parallel for num_threads(omp_threads) if(!center_only || agent_size >= PARALLEL_INFO_MIN_AGENTS)
     for (int i = 0; i < agent_size; i++) {
         Agent *agent = agents[i];
         // get spatial view
-        map.extract_view(agent, view_buffer.data + i*view_height*view_width*n_channel, &channel_trans[0], range,
+        map.extract_view(agent, view_buffer.data + i*output_height*output_width*n_channel, &channel_trans[0], range,
                          n_channel, view_width, view_height, view_x_offset, view_y_offset,
-                         view_left_top_x, view_left_top_y, view_right_bottom_x, view_right_bottom_y);
+                         view_left_top_x, view_left_top_y, view_right_bottom_x, view_right_bottom_y, center_only);
 
-        if (minimap_mode) {
+        if (minimap_mode && !center_only) {
             int self_x = agent->get_pos().x / scale_w;
             int self_y = agent->get_pos().y / scale_h;
             for (int j = 0; j < n_group; j++) {
@@ -396,7 +412,7 @@ void GridWorld::get_observation(GroupHandle group, float **linear_buffers) {
         }
     }
 
-    if (minimap_mode)
+    if (minimap_mode && !center_only)
         delete [] minimap.data;
 }
 
@@ -472,7 +488,7 @@ void GridWorld::step(int *done) {
     std::map<PositionInteger, int> attack_obj_counter;    // for statistic info
 
     // attack
-    #pragma omp parallel for reduction(merge: render_attack_buffer)
+    #pragma omp parallel for num_threads(omp_threads) reduction(merge: render_attack_buffer)
     for (int i = 0; i < attack_size; i++) {
         Agent *agent = attack_buffer[i].agent;
 
@@ -524,7 +540,7 @@ void GridWorld::step(int *done) {
         int starve_ct = 0;
         size_t agent_size = agents.size();
 
-        #pragma omp parallel for reduction(+: starve_ct)
+        #pragma omp parallel for num_threads(omp_threads) reduction(+: starve_ct)
         for (int j = 0; j < agent_size; j++) {
             Agent *agent = agents[j];
 
@@ -561,7 +577,7 @@ void GridWorld::step(int *done) {
 
         if (large_map_mode) {
             LOG(TRACE) << "turn parallel.  ";
-            #pragma omp parallel for
+            #pragma omp parallel for num_threads(omp_threads)
             for (int i = 0; i < NUM_SEP_BUFFER; i++) {        // turn in separate areas, do them in parallel
                 do_turn_for_a_buffer(turn_buffers[i], map);
             }
@@ -604,7 +620,7 @@ void GridWorld::step(int *done) {
 
     if (large_map_mode) {
         LOG(TRACE) << "move parallel.  ";
-        #pragma omp parallel for
+        #pragma omp parallel for num_threads(omp_threads)
         for (int i = 0; i < NUM_SEP_BUFFER; i++) {    // move in separate areas, do them in parallel
             do_move_for_a_buffer(move_buffers[i], map);
         }
@@ -633,7 +649,7 @@ void GridWorld::step(int *done) {
 void GridWorld::clear_dead() {
     size_t group_size = groups.size();
 
-    #pragma omp parallel for
+    #pragma omp parallel for num_threads(omp_threads)
     for (int i = 0; i < group_size; i++) {
         Group &group = groups[i];
         group.init_reward();
@@ -697,7 +713,7 @@ void GridWorld::get_reward(GroupHandle group, float *buffer) {
     size_t  agent_size = agents.size();
     Reward  group_reward = groups[group].get_reward();
 
-    #pragma omp parallel for
+    #pragma omp parallel for num_threads(omp_threads) if(agent_size >= PARALLEL_INFO_MIN_AGENTS)
     for (int i = 0; i < agent_size; i++) {
         buffer[i] = agents[i]->get_reward() + group_reward;
     }
@@ -714,24 +730,26 @@ void GridWorld::get_info(GroupHandle group, const char *name, void *void_buffer)
     float *float_buffer = (float *)void_buffer;
     bool  *bool_buffer  = (bool *)void_buffer;
 
-    if (strequ(name, "num")) {         // int
+    if (strequ(name, "num_threads")) {
+        int_buffer[0] = omp_threads;
+    } else if (strequ(name, "num")) {         // int
         int_buffer[0] = groups[group].get_num();
     } else if (strequ(name, "id")) {   // int
         size_t agent_size = agents.size();
-        #pragma omp parallel for
+        #pragma omp parallel for num_threads(omp_threads) if(agent_size >= PARALLEL_INFO_MIN_AGENTS)
         for (int i = 0; i < agent_size; i++) {
             int_buffer[i] = agents[i]->get_id();
         }
     } else if (strequ(name, "pos")) {   // int
         size_t agent_size = agents.size();
-        #pragma omp parallel for
+        #pragma omp parallel for num_threads(omp_threads) if(agent_size >= PARALLEL_INFO_MIN_AGENTS)
         for (int i = 0; i < agent_size; i++) {
             int_buffer[2 * i] = agents[i]->get_pos().x;
             int_buffer[2 * i + 1] = agents[i]->get_pos().y;
         }
     } else if (strequ(name, "alive")) {  // bool
         size_t agent_size = agents.size();
-        #pragma omp parallel for
+        #pragma omp parallel for num_threads(omp_threads) if(agent_size >= PARALLEL_INFO_MIN_AGENTS)
         for (int i = 0; i < agent_size; i++) {
             bool_buffer[i] = !agents[i]->is_dead();
         }
@@ -769,7 +787,7 @@ void GridWorld::get_info(GroupHandle group, const char *name, void *void_buffer)
         float sum_x, sum_y;
         sum_x = sum_y = 0;
         memset(action_counter, 0, sizeof(int) * n_action);
-        #pragma omp parallel for reduction(+: sum_x) reduction(+: sum_y)
+        #pragma omp parallel for num_threads(omp_threads) reduction(+: sum_x) reduction(+: sum_y)
         for (int i = 0; i < agent_size; i++) {
             Position pos = agents[i]->get_pos();
             sum_x += pos.x;

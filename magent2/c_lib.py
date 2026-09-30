@@ -2,7 +2,6 @@
 
 
 import ctypes
-import multiprocessing
 import os
 import platform
 import sysconfig
@@ -41,6 +40,4 @@ def as_bool_c_array(buf):
     return buf.ctypes.data_as(ctypes.POINTER(ctypes.c_bool))
 
 
-if "OMP_NUM_THREADS" not in os.environ:
-    os.environ["OMP_NUM_THREADS"] = str(multiprocessing.cpu_count() // 2)
 _LIB = _load_lib()

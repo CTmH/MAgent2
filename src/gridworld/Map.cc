@@ -129,7 +129,7 @@ void Map::average_pooling_group(float *group_buffer, int x0, int y0, int width, 
 void Map::extract_view(const Agent *agent, float *linear_buffer, const int *channel_trans, const Range *range,
                        int n_channel, int width, int height, int view_x_offset, int view_y_offset,
                        int view_left_top_x, int view_left_top_y,
-                       int view_right_bottom_x, int view_right_bottom_y) const {
+                       int view_right_bottom_x, int view_right_bottom_y, bool center_only) const {
     // convert coordinates between absolute map and relative view
     Direction dir = agent->get_dir();
 
@@ -139,6 +139,23 @@ void Map::extract_view(const Agent *agent, float *linear_buffer, const int *chan
 
     save_to_real(agent, agent_x, agent_y);
     rela_to_abs(agent_x, agent_y, dir, view_x_offset, view_y_offset, eye_x, eye_y);
+    if (center_only) {
+        rela_to_abs(eye_x, eye_y, dir, view_left_top_x + width / 2,
+                    view_left_top_y + height / 2, x1, y1);
+        if (!in_board(x1, y1) || !range->is_in(height / 2, width / 2))
+            return;
+        PositionInteger pos_int = pos2int(x1, y1);
+        int channel_id = channel_ids[pos_int];
+        if (channel_id == -1)
+            return;
+        channel_id = channel_trans[channel_id];
+        linear_buffer[channel_id] = 1;
+        if (slots[pos_int].occupier != nullptr && slots[pos_int].occ_type == OCC_AGENT) {
+            const Agent *p = (Agent *)slots[pos_int].occupier;
+            linear_buffer[channel_id + 1] = p->get_hp() / p->get_type().hp;
+        }
+        return;
+    }
     rela_to_abs(eye_x, eye_y, dir, view_left_top_x, view_left_top_y, x1, y1);
     rela_to_abs(eye_x, eye_y, dir, view_right_bottom_x, view_right_bottom_y, x2, y2);
 

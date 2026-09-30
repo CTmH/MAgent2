@@ -48,6 +48,7 @@ class magent_parallel_env(ParallelEnv):
             for i in range(self.team_sizes[j])
         ]
         self.possible_agents = self.agents[:]
+        self._agent_indices = {agent: i for i, agent in enumerate(self.possible_agents)}
         num_actions = [env.get_action_space(handle)[0] for handle in self.handles]
         action_spaces_list = [
             Discrete(num_actions[j])
@@ -167,69 +168,56 @@ class magent_parallel_env(ParallelEnv):
         self.team_sizes = [self.env.get_num(handle) for handle in self.handles]
         return self._compute_observations(), {agent: {} for agent in self.agents}
 
-    def _compute_observations(self):
-        observes = [None] * self.max_num_agents
-        for handle in self.handles:
-            ids = self.env.get_agent_id(handle)
+    def _compute_observations(self, group_ids=None):
+        if group_ids is None:
+            group_ids = [self.env.get_agent_id(handle) for handle in self.handles]
+        observes = list(self._zero_obs.values())
+        for handle, ids in zip(self.handles, group_ids):
             view, features = self.env.get_observation(handle)
 
             if self.minimap_mode and not self.extra_features:
                 features = features[:, -2:]
             if self.minimap_mode or self.extra_features:
-                feat_reshape = np.expand_dims(np.expand_dims(features, 1), 1)
-                feat_img = np.tile(feat_reshape, (1, view.shape[1], view.shape[2], 1))
-                fin_obs = np.concatenate([view, feat_img], axis=-1)
+                channels = view.shape[-1]
+                fin_obs = np.empty(
+                    (*view.shape[:-1], channels + features.shape[-1]),
+                    dtype=np.result_type(view.dtype, features.dtype),
+                )
+                fin_obs[..., :channels] = view
+                fin_obs[..., channels:] = features[:, None, None, :]
             else:
                 fin_obs = np.copy(view)
             for id, obs in zip(ids, fin_obs):
                 observes[id] = obs
 
-        ret_agents = set(self.agents)
-        return {
-            agent: obs if obs is not None else self._zero_obs[agent]
-            for agent, obs in zip(self.possible_agents, observes)
-            if agent in ret_agents
-        }
+        return {agent: observes[self._agent_indices[agent]] for agent in self.agents}
 
-    def _compute_rewards(self):
+    def _compute_rewards(self, group_ids):
         rewards = np.zeros(self.max_num_agents)
-        for handle in self.handles:
-            ids = self.env.get_agent_id(handle)
+        for handle, ids in zip(self.handles, group_ids):
             rewards[ids] = self.env.get_reward(handle)
-        ret_agents = set(self.agents)
-        return {
-            agent: float(rew)
-            for agent, rew in zip(self.possible_agents, rewards)
-            if agent in ret_agents
-        }
+        return {agent: float(rewards[self._agent_indices[agent]]) for agent in self.agents}
 
-    def _compute_terminates(self, step_done):
+    def _compute_terminates(self, step_done, group_ids):
         dones = np.ones(self.max_num_agents, dtype=bool)
         if not step_done:
-            for i, handle in enumerate(self.handles):
-                ids = self.env.get_agent_id(handle)
+            for i, (handle, ids) in enumerate(zip(self.handles, group_ids)):
                 dones[ids] = ~self.env.get_alive(handle)
                 self.team_sizes[i] = len(ids) - np.array(dones[ids]).sum()
-        ret_agents = set(self.agents)
-        return {
-            agent: bool(done)
-            for agent, done in zip(self.possible_agents, dones)
-            if agent in ret_agents
-        }
+        return {agent: bool(dones[self._agent_indices[agent]]) for agent in self.agents}
 
     def state(self):
         """Returns an observation of the global environment."""
         state = np.copy(self.base_state)
 
         for handle in self._all_handles:
-            view, features = self.env.get_observation(handle)
-
             pos = self.env.get_pos(handle)
+            if len(pos) == 0:
+                continue
+            center, features = self.env.get_state_observation(handle)
             pos_x, pos_y = zip(*pos)
             state[pos_x, pos_y, 1 + handle.value * 2] = 1
-            state[pos_x, pos_y, 2 + handle.value * 2] = view[
-                :, view.shape[1] // 2, view.shape[2] // 2, 2
-            ]
+            state[pos_x, pos_y, 2 + handle.value * 2] = center
 
             if self.extra_features:
                 add_zeros = np.zeros(
@@ -272,11 +260,12 @@ class magent_parallel_env(ParallelEnv):
         self.frames += 1
 
         step_done = self.env.step()
+        group_ids = [self.env.get_agent_id(handle) for handle in self.handles]
 
         truncations = {agent: self.frames >= self.max_cycles for agent in self.agents}
-        terminations = self._compute_terminates(step_done)
-        observations = self._compute_observations()
-        rewards = self._compute_rewards()
+        terminations = self._compute_terminates(step_done, group_ids)
+        observations = self._compute_observations(group_ids)
+        rewards = self._compute_rewards(group_ids)
         infos = {agent: {} for agent in self.agents}
         self.env.clear_dead()
         self.agents = [

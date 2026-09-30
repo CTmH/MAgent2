@@ -26,6 +26,7 @@ using ::magent::environment::GroupHandle;
 DLL_EXPORT int env_new_game(EnvHandle *game, const char *name);
 DLL_EXPORT int env_delete_game(EnvHandle game);
 DLL_EXPORT int env_config_game(EnvHandle game, const char *name, void *p_value);
+DLL_EXPORT int env_openmp_enabled();
 
 // run step
 DLL_EXPORT int env_reset(EnvHandle game);
@@ -52,6 +53,7 @@ DLL_EXPORT int gridworld_add_agents(EnvHandle game, GroupHandle group, int n, co
 
 // run step
 DLL_EXPORT int gridworld_clear_dead(EnvHandle game);
+DLL_EXPORT int gridworld_get_state_observation(EnvHandle game, GroupHandle group, float **buffer);
 DLL_EXPORT int gridworld_set_goal(EnvHandle game, GroupHandle group, const char *method, const int *linear_buffer);
 
 // reward description
