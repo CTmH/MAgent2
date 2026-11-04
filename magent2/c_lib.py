@@ -2,19 +2,18 @@
 
 
 import ctypes
-import os
-import platform
-import sysconfig
 import importlib.util
+import os
+import sysconfig
 
 
 def _load_lib():
     """Load library in local."""
     spec = importlib.util.find_spec("magent2")
     if spec is None or spec.origin is None:
-            raise FileNotFoundError("Could not find magent2 package")
+        raise FileNotFoundError("Could not find magent2 package")
     package_dir = os.path.dirname(spec.origin)
-    suffix = sysconfig.get_config_var('EXT_SUFFIX')
+    suffix = sysconfig.get_config_var("EXT_SUFFIX")
     target_name = f"libmagent{suffix}"
     path_to_so_file = os.path.join(package_dir, target_name)
 

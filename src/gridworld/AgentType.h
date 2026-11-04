@@ -34,7 +34,7 @@ public:
     Reward effective_attack_reward_pool, ineffective_attack_reward_pool;
     Reward critical_contribution_reward_pool;
 
-    // Keep the legacy nine action-feature slots for complementary pursuers.
+    // Pursuers factor attack mode and target offset into nine bounded features.
     int get_action_feature_size() const {
         return complementary_attack ? 9 : (int)action_space.size();
     }

@@ -115,7 +115,11 @@ class magent_parallel_env(ParallelEnv):
         feature_spaces = [self.env.get_feature_space(handle) for handle in self.handles]
         assert all(len(tup) == 3 for tup in view_spaces)
         assert all(len(tup) == 1 for tup in feature_spaces)
-        feat_size = [[fs[0]] for fs in feature_spaces]
+        # A visible entity may belong to a group with a wider action encoding.
+        feat_size = [
+            [max(self.env.get_feature_space(h)[0] for h in self._all_handles)]
+            for _ in feature_spaces
+        ]
         for feature_space in feat_size:
             if not self.extra_features:
                 feature_space[0] = 2 if self.minimap_mode else 0
@@ -173,10 +177,13 @@ class magent_parallel_env(ParallelEnv):
             group_ids = [self.env.get_agent_id(handle) for handle in self.handles]
         observes = list(self._zero_obs.values())
         for handle, ids in zip(self.handles, group_ids):
-            view, features = self.env.get_observation(handle)
+            if self.extra_features or self.minimap_mode:
+                view, features = self.env.get_entity_observation(handle)
+            else:
+                view, features = self.env.get_observation(handle)
 
             if self.minimap_mode and not self.extra_features:
-                features = features[:, -2:]
+                features = features[..., -2:]
             if self.minimap_mode or self.extra_features:
                 channels = view.shape[-1]
                 fin_obs = np.empty(
@@ -184,7 +191,7 @@ class magent_parallel_env(ParallelEnv):
                     dtype=np.result_type(view.dtype, features.dtype),
                 )
                 fin_obs[..., :channels] = view
-                fin_obs[..., channels:] = features[:, None, None, :]
+                fin_obs[..., channels:] = features
             else:
                 fin_obs = np.copy(view)
             for id, obs in zip(ids, fin_obs):
@@ -196,7 +203,9 @@ class magent_parallel_env(ParallelEnv):
         rewards = np.zeros(self.max_num_agents)
         for handle, ids in zip(self.handles, group_ids):
             rewards[ids] = self.env.get_reward(handle)
-        return {agent: float(rewards[self._agent_indices[agent]]) for agent in self.agents}
+        return {
+            agent: float(rewards[self._agent_indices[agent]]) for agent in self.agents
+        }
 
     def _compute_terminates(self, step_done, group_ids):
         dones = np.ones(self.max_num_agents, dtype=bool)
@@ -220,13 +229,14 @@ class magent_parallel_env(ParallelEnv):
             state[pos_x, pos_y, 2 + handle.value * 2] = center
 
             if self.extra_features:
+                # Include non-controlled groups, such as Gather's food, in the spatial prefix.
                 add_zeros = np.zeros(
                     (
                         features.shape[0],
                         state.shape[2]
                         - (
                             1
-                            + len(self.team_sizes) * 2
+                            + len(self._all_handles) * 2
                             + features.shape[1]
                             - self._minimap_features
                         ),
@@ -239,10 +249,13 @@ class magent_parallel_env(ParallelEnv):
                 rewards = rewards.reshape(len(rewards), 1)
                 state_features = np.hstack((actions, rewards))
 
-                state[pos_x, pos_y, 1 + len(self.team_sizes) * 2 :] = state_features
+                state[pos_x, pos_y, 1 + len(self._all_handles) * 2 :] = state_features
         return state
 
     def step(self, all_actions):
+        if not self.agents:
+            # Truncation can leave native entities alive without any Python actions.
+            return {}, {}, {}, {}, {}
         action_list = [-1] * len(self.agents)
         for i, agent in enumerate(self.agents):
             if agent in all_actions:

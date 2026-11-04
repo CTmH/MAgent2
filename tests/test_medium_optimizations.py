@@ -52,8 +52,14 @@ def check_center(engine, handle):
 
 
 def test_center_sampling():
-    for name in ("battle_v4", "battlefield_v5", "combined_arms_v6",
-                 "adversarial_pursuit_v4", "gather_v5", "tiger_deer_v4"):
+    for name in (
+        "battle_v4",
+        "battlefield_v5",
+        "combined_arms_v6",
+        "adversarial_pursuit_v4",
+        "gather_v5",
+        "tiger_deer_v4",
+    ):
         maker = importlib.import_module("magent2.environments." + name).parallel_env
         for mini, extra in ((False, False), (False, True), (True, False), (True, True)):
             env = maker(minimap_mode=mini, extra_features=extra)
@@ -71,19 +77,41 @@ def test_center_sampling():
     # Sector views, even agent sizes, food channels, all four directions and edges.
     for mini in (False, True):
         cfg = gw.Config()
-        cfg.set({"map_width": 20, "map_height": 20, "food_mode": True,
-                 "minimap_mode": mini, "embedding_size": 2})
-        kind = cfg.register_agent_type("test", {
-            "width": 2, "length": 2, "hp": 5, "speed": 1,
-            "view_range": gw.SectorRange(4, 90), "attack_range": gw.CircleRange(1),
-        })
+        cfg.set(
+            {
+                "map_width": 20,
+                "map_height": 20,
+                "food_mode": True,
+                "minimap_mode": mini,
+                "embedding_size": 2,
+            }
+        )
+        kind = cfg.register_agent_type(
+            "test",
+            {
+                "width": 2,
+                "length": 2,
+                "hp": 5,
+                "speed": 1,
+                "view_range": gw.SectorRange(4, 90),
+                "attack_range": gw.CircleRange(1),
+            },
+        )
         cfg.add_group(kind)
         engine = gw.GridWorld(cfg)
         engine.reset()
         handle = engine.get_handles()[0]
-        engine.add_agents(handle, method="custom", pos=[
-            (1, 1, 0), (16, 1, 1), (1, 16, 2), (16, 16, 3), (10, 10, 0),
-        ])
+        engine.add_agents(
+            handle,
+            method="custom",
+            pos=[
+                (1, 1, 0),
+                (16, 1, 1),
+                (1, 16, 2),
+                (16, 16, 3),
+                (10, 10, 0),
+            ],
+        )
         check_center(engine, handle)
 
 
@@ -117,10 +145,14 @@ def test_getter_cutoff():
             gw._LIB.env_config_game(
                 engine.game, b"num_threads", ctypes.byref(ctypes.c_int(threads))
             )
-            results.append([
-                engine.get_agent_id(handle), engine.get_pos(handle),
-                engine.get_alive(handle), engine.get_reward(handle),
-            ])
+            results.append(
+                [
+                    engine.get_agent_id(handle),
+                    engine.get_pos(handle),
+                    engine.get_alive(handle),
+                    engine.get_reward(handle),
+                ]
+            )
         for serial, parallel in zip(*results):
             np.testing.assert_array_equal(serial, parallel)
 

@@ -14,15 +14,15 @@ def test_step_optimizations():
             observations, _ = env.reset(seed=7)
             for handle in env.handles:
                 ids = env.env.get_agent_id(handle)
-                view, features = env.env.get_observation(handle)
+                view, features = env.env.get_entity_observation(handle)
                 if minimap and not extra:
-                    features = features[:, -2:]
+                    features = features[..., -2:]
                 expected = view
                 if minimap or extra:
                     expected = np.concatenate(
                         [
                             view,
-                            np.tile(features[:, None, None, :], (1, *view.shape[1:3], 1)),
+                            features,
                         ],
                         axis=-1,
                     )

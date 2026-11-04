@@ -159,3 +159,8 @@ DLL_EXPORT int gridworld_add_reward_rule(EnvHandle game, int on, int *receiver, 
     ((::magent::gridworld::GridWorld *)game)->add_reward_rule(on, receiver, value, n_receiver, is_terminal, auto_value);
     return 0;
 }
+
+DLL_EXPORT int gridworld_get_entity_observation(EnvHandle game, GroupHandle group, float **buffers) {
+    static_cast<::magent::gridworld::GridWorld *>(game)->get_entity_observation(group, buffers);
+    return 0;
+}

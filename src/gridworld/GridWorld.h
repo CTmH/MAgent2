@@ -48,6 +48,7 @@ public:
     void get_observation(GroupHandle group, float **linear_buffers) override;
     // The state sampler consumes only center channel 2 and the feature buffer.
     void get_observation(GroupHandle group, float **linear_buffers, bool center_only);
+    void get_entity_observation(GroupHandle group, float **buffers);
     void set_action(GroupHandle group, const int *actions) override;
     void step(int *done) override;
     void get_reward(GroupHandle group, float *buffer) override;
@@ -140,6 +141,7 @@ public:
                                                         next_reward(0),
                                                         type(type),
                                                         last_op(OP_NULL), op_obj(nullptr), index(0) {
+        last_reward = 0;
         this->id = id;
         dir = Direction(rand() % 4);
         hp = type.hp;
@@ -172,7 +174,7 @@ public:
     }
 
     void init_reward() {
-        last_reward = next_reward;
+        // Preserve the completed reward snapshot while preparing the next step.
         last_op = OP_NULL;
         next_reward = type.step_reward;
         op_obj = nullptr;
@@ -180,6 +182,7 @@ public:
     }
     Reward get_reward()         { return next_reward; }
     Reward get_last_reward()    { return last_reward; }
+    void publish_reward(float group_reward) { last_reward = next_reward + group_reward; }
     void add_reward(Reward add) { next_reward += add; }
 
     void set_involved(bool value) { be_involved = value; }

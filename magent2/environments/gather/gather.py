@@ -177,6 +177,8 @@ def get_config(
     cfg = gw.Config()
 
     cfg.set({"map_width": size, "map_height": size})
+    # Include food IDs as well as controllable agents without truncating native IDs.
+    cfg.set({"embedding_size": 32})
     cfg.set({"minimap_mode": minimap_mode})
     if seed is not None:
         cfg.set({"seed": seed})

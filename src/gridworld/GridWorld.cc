@@ -361,7 +361,7 @@ void GridWorld::get_observation(GroupHandle group, float **linear_buffers, bool 
         #pragma omp parallel for num_threads(omp_threads)
         for (int i = 0; i < n_group; i++) {
             std::vector<Agent*> &agents_ = groups[i].get_agents();
-            AgentType type_ = agents[0]->get_type();
+            const AgentType &type_ = groups[i].get_type();
             size_t total_ct = 0;
             for (int j = 0; j < agents_.size(); j++) {
                 if (type_.can_absorb && agents_[j]->is_absorbed()) // ignore absorbed goal
@@ -371,10 +371,10 @@ void GridWorld::get_observation(GroupHandle group, float **linear_buffers, bool 
                 minimap.at(y, x, i)++;
                 total_ct++;
             }
-            // scale
+            // Empty groups contribute an all-zero minimap rather than NaNs.
             for (int j = 0; j < view_height; j++) {
                 for (int k = 0; k < view_width; k++) {
-                    minimap.at(j, k, i) /= total_ct;
+                    minimap.at(j, k, i) /= std::max(total_ct, size_t(1));
                 }
             }
         }
@@ -410,20 +410,20 @@ void GridWorld::get_observation(GroupHandle group, float **linear_buffers, bool 
         // last action
         const int action = agent->get_action();
         if (type.complementary_attack) {
-            // Five movement slots, two attack modes, and normalized local dx/dy.
-            // Unset actions leave all nine slots zero after reset.
+            // Unset actions after reset leave the zero-initialized slots untouched.
             if (action >= 0 && action < type.attack_base) {
                 feature_buffer.at(i, embedding_size + action) = 1;
             } else if (action >= type.attack_base && action < (int)type.action_space.size()) {
-                const int count = type.attack_range->get_count();
+                const int target_count = type.attack_range->get_count();
                 const int attack = action - type.attack_base;
                 int dx, dy;
-                type.attack_range->num2delta(attack % count, dx, dy);
-                feature_buffer.at(i, embedding_size + 5 + attack / count) = 1;
+                type.attack_range->num2delta(attack % target_count, dx, dy);
+                feature_buffer.at(i, embedding_size + 5 + attack / target_count) = 1;
+                // Fixed radius two maps each local offset from [-2, 2] to [0, 1].
                 feature_buffer.at(i, embedding_size + 7) = (dx + 2) / 4.0f;
                 feature_buffer.at(i, embedding_size + 8) = (dy + 2) / 4.0f;
             }
-        } else {
+        } else if (action >= 0 && action < n_action) {
             feature_buffer.at(i, embedding_size + action) = 1;
         }
         // last reward
@@ -436,6 +436,47 @@ void GridWorld::get_observation(GroupHandle group, float **linear_buffers, bool 
 
     if (minimap_mode && !center_only)
         delete [] minimap.data;
+}
+
+void GridWorld::get_entity_observation(GroupHandle group, float **buffers) {
+    int feature_width = 0;
+    for (int g = 0; g < groups.size(); ++g)
+        feature_width = std::max(feature_width, get_feature_size(g));
+    // Reuse the state sampler to keep entity encodings identical in both outputs.
+    std::map<const Agent *, std::vector<float>> features;
+    for (int g = 0; g < groups.size(); ++g) {
+        size_t count = groups[g].get_num();
+        int size = get_feature_size(g);
+        std::vector<float> centers(count * groups[g].get_type().n_channel);
+        std::vector<float> local(count * size);
+        float *temporary[] = {centers.data(), local.data()};
+        get_observation(g, temporary, true);
+        for (size_t i = 0; i < count; ++i) {
+            std::vector<float> padded(feature_width, 0);
+            // Keep reward and optional absolute coordinates at a shared tail offset.
+            int tail = minimap_mode ? 3 : 1;
+            std::copy_n(local.data() + i * size, size - tail, padded.data());
+            std::copy_n(local.data() + i * size + size - tail, tail,
+                        padded.data() + feature_width - tail);
+            features.emplace(groups[g].get_agents()[i], std::move(padded));
+        }
+    }
+    const AgentType &type = groups[group].get_type();
+    int view_height = type.view_range->get_height();
+    int view_width = type.view_range->get_width();
+    size_t count = groups[group].get_num();
+    std::vector<float> own_features(count * get_feature_size(group));
+    float *temporary[] = {buffers[0], own_features.data()};
+    get_observation(group, temporary);
+    std::fill_n(buffers[1], count * view_height * view_width * feature_width, 0);
+    auto channels = make_channel_trans(group, group2channel(0), type.n_channel, groups.size());
+    int x1, y1, x2, y2;
+    type.view_range->get_range_rela_offset(x1, y1, x2, y2);
+    for (size_t i = 0; i < count; ++i)
+        map.extract_view(groups[group].get_agents()[i], buffers[0] + i * view_height * view_width * type.n_channel,
+                         channels.data(), type.view_range, type.n_channel, view_width, view_height,
+                         type.view_x_offset, type.view_y_offset, x1, y1, x2, y2,
+                         false, &features, buffers[1] + i * view_height * view_width * feature_width, feature_width);
 }
 
 void GridWorld::set_action(GroupHandle group, const int *actions) {
@@ -712,6 +753,10 @@ void GridWorld::step(int *done) {
 
     LOG(TRACE) << "calc_reward.  ";
     calc_reward();
+    // Publish once before terminal entities are deleted and accumulators reset.
+    for (Group &group : groups)
+        for (Agent *agent : group.get_agents())
+            agent->publish_reward(group.get_reward());
 
     LOG(TRACE) << "game over check.  ";
     int live_ct = 0;  // default game over condition: all the agents in an arbitrary group die

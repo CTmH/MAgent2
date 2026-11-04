@@ -11,7 +11,6 @@ import numpy as np
 
 from magent2 import gridworld as gw
 from magent2.environments import complementary_pursuit_v1 as cp
-from magent2.environments import tiger_deer_v4
 
 
 OFFSETS = [
@@ -192,16 +191,14 @@ def test_shapes_and_encoding():
     for mini in (False, True):
         for extra in (False, True):
             new = cp.parallel_env(map_size=15, minimap_mode=mini, extra_features=extra)
-            old = tiger_deer_v4.parallel_env(
-                map_size=15, minimap_mode=mini, extra_features=extra
-            )
-            assert new.state_space.shape == old.state_space.shape
+            assert new.state_space.shape == (15, 15, 25 if extra else 5)
             for a, b in (("pursuer_0", "tiger_0"), ("evader_0", "deer_0")):
-                assert new.observation_space(a).shape == old.observation_space(b).shape
+                assert new.observation_space(a).shape[-1] == (
+                    (29 if mini else 25) if extra else (9 if mini else 5)
+                )
             assert new.action_space("pursuer_0").n == 29
             assert new.action_space("evader_0").n == 5
             new.close()
-            old.close()
             e = Scene("A", minimap_mode=mini, extra_features=extra)
             _, mask = e.env.get_view2attack(e.handles[1])
             assert np.count_nonzero(mask >= 0) == 12
@@ -209,21 +206,32 @@ def test_shapes_and_encoding():
                 assert mask[4 + dy, 4 + dx] == i
             for action in range(29):
                 e.reset(seed=42)
-                e.step({"pursuer_0": action})
+                _, reset_features = e.env.get_observation(e.handles[1])
+                np.testing.assert_array_equal(reset_features[0, 10:19], np.zeros(9))
+                observations = e.step({"pursuer_0": action})[0]
                 _, features = e.env.get_observation(e.handles[1])
                 _, center_features = e.env.get_state_observation(e.handles[1])
                 expected = np.zeros(9, dtype=np.float32)
                 if action < 5:
                     expected[action] = 1
                 else:
-                    mode, offset = divmod(action - 5, 12)
+                    mode, target = divmod(action - 5, 12)
                     expected[5 + mode] = 1
-                    expected[7:] = (np.array(OFFSETS[offset]) + 2) / 4
+                    expected[7:] = (np.array(OFFSETS[target]) + 2) / 4
+                assert np.isfinite(features[:, 10:19]).all()
+                assert ((features[:, 10:19] >= 0) & (features[:, 10:19] <= 1)).all()
                 np.testing.assert_array_equal(features[0, 10:19], expected)
                 np.testing.assert_array_equal(features, center_features)
                 if extra:
                     x, y = e.env.get_pos(e.handles[1])[0]
                     np.testing.assert_array_equal(e.state()[x, y, 15:24], expected)
+                    spatial = observations["pursuer_0"]
+                    start = 17 if mini else 15
+                    action_features = spatial[..., start : start + 9]
+                    assert ((action_features >= 0) & (action_features <= 1)).all()
+                    np.testing.assert_array_equal(action_features[4, 4], expected)
+                    all_state_features = e.state()[..., 15:24]
+                    assert ((all_state_features >= 0) & (all_state_features <= 1)).all()
             e.close()
 
 
@@ -293,7 +301,7 @@ def test_thread_equivalence():
         actions = {
             a: int(rng.integers(envs[0].action_space(a).n)) for a in envs[0].agents
         }
-        a, b = [e.step(actions) for e in envs]
+        a, b = (e.step(actions) for e in envs)
         for x, y in zip(a, b):
             assert x.keys() == y.keys()
             for key in x:

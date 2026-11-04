@@ -1,12 +1,13 @@
 import os
 import platform
 import subprocess
+import sysconfig
 from subprocess import check_output
 
 import setuptools
 from setuptools import Extension
 from setuptools.command.build_ext import build_ext
-import sysconfig
+
 
 ###
 # Build process:
@@ -110,7 +111,7 @@ class CMakeBuild(build_ext):
             # subprocess.check_call(
             #     ["mv", lib_name, build_res_dir]
             # )
-            
+
             # 根据平台确定原始文件名
             if platform.system() == "Darwin":
                 original_name = "libmagent.dylib"
@@ -118,15 +119,15 @@ class CMakeBuild(build_ext):
                 original_name = "libmagent.so"
             elif platform.system() == "Windows":
                 original_name = "magent.dll"
-            
+
             # 构建目标文件名
-            suffix = sysconfig.get_config_var('EXT_SUFFIX')
+            suffix = sysconfig.get_config_var("EXT_SUFFIX")
             target_name = f"libmagent{suffix}"
-            
+
             # 执行重命名
             original_path = os.path.join(extdir, original_name)
             target_path = os.path.join(extdir, target_name)
-            
+
             if os.path.exists(original_path):
                 print(f"Renaming {original_path} to {target_path}")
                 if os.path.exists(target_path):

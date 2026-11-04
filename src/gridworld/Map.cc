@@ -129,7 +129,9 @@ void Map::average_pooling_group(float *group_buffer, int x0, int y0, int width, 
 void Map::extract_view(const Agent *agent, float *linear_buffer, const int *channel_trans, const Range *range,
                        int n_channel, int width, int height, int view_x_offset, int view_y_offset,
                        int view_left_top_x, int view_left_top_y,
-                       int view_right_bottom_x, int view_right_bottom_y, bool center_only) const {
+                       int view_right_bottom_x, int view_right_bottom_y, bool center_only,
+                       const std::map<const Agent *, std::vector<float>> *features,
+                       float *feature_buffer, int feature_width) const {
     // convert coordinates between absolute map and relative view
     Direction dir = agent->get_dir();
 
@@ -212,6 +214,11 @@ void Map::extract_view(const Agent *agent, float *linear_buffer, const int *chan
                 if (slots[pos_int].occupier != nullptr && slots[pos_int].occ_type == OCC_AGENT) { // is agent
                     Agent *p = ((Agent *) slots[pos_int].occupier);
                     buffer.at(view_y, view_x, channel_id + 1) = p->get_hp() / p->get_type().hp; // normalize hp
+                    if (features != nullptr) {
+                        const auto &values = features->at(p);
+                        std::copy(values.begin(), values.end(),
+                                  feature_buffer + (view_y * width + view_x) * feature_width);
+                    }
                 }
             }
 

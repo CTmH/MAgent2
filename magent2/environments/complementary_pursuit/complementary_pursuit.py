@@ -14,10 +14,12 @@ A critical attacker is one whose removal would make the attack ineffective.
 Capture rewards and HP apply to both effective and ineffective captures.
 A full-HP participant's unused share of HP is not redistributed.
 
-Observations and state retain Tiger-Deer's shapes for every feature mode.
-Pursuer action history uses five movement one-hot slots, two attack-mode
-one-hot slots, and (dx + 2) / 4, (dy + 2) / 4. Non-applicable slots are zero.
-Rewards in extra features retain the existing previous-step convention.
+Visible entities provide their own ID, action features and transition reward.
+Pursuer action history uses five movement one-hot slots, two attack-mode slots,
+and two local target offsets normalized as (offset + 2) / 4. All nine values
+are in [0, 1]. Movement zeros the attack slots; attacks zero movement slots.
+All groups use a common feature width, with zero padding before reward and
+optional position fields. Observations and state use the same reward snapshot.
 """
 
 import math

@@ -77,13 +77,17 @@ The usual `map_size`, `max_cycles`, `minimap_mode`, `extra_features`, `seed`,
 `render_mode`, and `num_threads` options are also supported. Reward pools,
 damage, and evader recovery must be nonnegative; HP must be positive.
 
-Observation and state shapes match Tiger-Deer under the same map and feature
-settings. With `extra_features=True`, the pursuer's nine action-history slots
-encode five movement one-hot values, two attack-mode one-hot values, and
-`(dx + 2) / 4`, `(dy + 2) / 4`. Movement zeros the attack slots; attacks zero
-the movement slots. These feature meanings and the action space differ from
-Tiger-Deer, so existing policies are not directly compatible. The spatial
-views retain their original sizes: 9x9 for pursuers and 3x3 for evaders.
+Extra observation features belong to each visible entity and are zero on
+unoccupied cells. Different agent types share a padded action-feature layout,
+with reward and optional absolute position at fixed tail offsets. Pursuers use
+nine action-history slots: five movement one-hot values, two attack-mode one-hot
+values, and `(dx + 2) / 4`, `(dy + 2) / 4`. All nine values are in `[0, 1]`.
+Movement zeros the attack slots; attacks zero the movement slots. Reset zeros
+all nine slots. The action input remains `Discrete(29)`. Observations returned
+by a step and the subsequent state use that transition's reward. Gather uses
+32-bit binary entity IDs and reserves separate spatial channels for food and
+omnivores. These observation contracts change input dimensions and require
+updating trained policies.
 
 Rebuild the native library after updating the sources. Regression checks:
 

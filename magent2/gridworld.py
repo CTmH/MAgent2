@@ -530,6 +530,27 @@ class GridWorld(Environment):
 
         return view_buf, feature_buf
 
+    def get_entity_observation(self, handle):
+        """Return spatial views and the features of each visible occupying entity.
+
+        Features have shape (agents, view_height, view_width, max_feature_size).
+        Empty cells are zero. Shorter action encodings are padded before the
+        shared reward and optional absolute-position fields.
+        """
+        getter = getattr(_LIB, "gridworld_get_entity_observation", None)
+        if getter is None:
+            raise RuntimeError("Rebuild MAgent2 to use entity observation features")
+        n = self.get_num(handle)
+        shape = self.view_space[handle.value]
+        width = max(space[0] for space in self.feature_space.values())
+        view = np.empty((n,) + shape, dtype=np.float32)
+        features = np.empty((n,) + shape[:2] + (width,), dtype=np.float32)
+        buffers = (ctypes.POINTER(ctypes.c_float) * 2)(
+            as_float_c_array(view), as_float_c_array(features)
+        )
+        getter(self.game, handle, buffers)
+        return view, features
+
     def get_state_observation(self, handle: ctypes.c_int32):
         """Read observation channel 2 at the center and the non-spatial features."""
         get_state = getattr(_LIB, "gridworld_get_state_observation", None)

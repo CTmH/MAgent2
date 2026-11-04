@@ -7,6 +7,7 @@
 #define MAGNET_GRIDWORLD_MAP_H
 
 #include <vector>
+#include <map>
 #include <random>
 #include "grid_def.h"
 #include "../Environment.h"
@@ -52,10 +53,13 @@ public:
     void remove_agent(Agent *agent);
 
     void average_pooling_group(float *group_buffer, int x0, int y0, int width, int height);
+    // When features is supplied, feature_buffer must hold height * width * feature_width floats.
     void extract_view(const Agent *agent, float *linear_buffer, const int *channel_trans, const Range *range,
                       int n_channel, int width, int height, int view_x_offset, int view_y_offset,
                       int view_left_top_x, int view_left_top_y,
-                      int view_right_bottom_x, int view_right_bottom_y, bool center_only=false) const;
+                      int view_right_bottom_x, int view_right_bottom_y, bool center_only=false,
+                      const std::map<const Agent *, std::vector<float>> *features=nullptr,
+                      float *feature_buffer=nullptr, int feature_width=0) const;
 
     PositionInteger get_attack_obj(const AttackAction &attack, int &obj_x, int &obj_y) const;
     Reward do_attack(Agent *agent, PositionInteger pos_int, GroupHandle &dead_group);
